@@ -1,113 +1,51 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 
-# 1. PAGE CONFIG
-st.set_page_config(page_title="AI Inventory Dashboard", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Inventory Dashboard", layout="wide")
 
-# 2. CUSTOM CSS FOR CARDS
-st.markdown("""
-<style>
-    .stMetric {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        border: 1px solid #e0e0e0;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.title("📊 Smart Inventory Control Center")
 
-# 3. HEADER
-st.title("📊 Smart Demand Forecast & Inventory Control")
-st.markdown("---")
+# --- SIDEBAR ---
+st.sidebar.header("Settings")
+uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=["csv"])
 
-# 4. FILE UPLOADER
-uploaded_file = st.sidebar.file_uploader("📂 Upload Processed CSV", type=["csv"])
-
-if uploaded_file:
-    # Load Data
+if uploaded_file is not None:
+    # 1. Load Data
     df = pd.read_csv(uploaded_file)
     
-    # --- ROBUST DATE HANDLING ---
-    # This prevents the ValueError you saw earlier
+    # 2. Show Raw Data Preview (To confirm it's NOT blank)
+    with st.expander("👀 Preview Raw Data"):
+        st.write(df.head(10))
+
+    # 3. Robust Date Conversion
     date_col = next((c for c in df.columns if "date" in c.lower()), None)
     if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
-        df = df.dropna(subset=[date_col]) # Remove rows that failed to convert
+        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        df = df.dropna(subset=[date_col])
         df = df.sort_values(by=date_col)
 
-    # --- AUTOMATIC COLUMN DETECTION ---
-    demand_col = next((c for c in df.columns if "actual" in c.lower() or "demand" in c.lower() or "sold" in c.lower()), None)
-    pred_col = next((c for c in df.columns if "pred" in c.lower() or "forecast" in c.lower()), None)
-    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
-    stock_col = next((c for c in df.columns if "inventory" in c.lower() or "stock" in c.lower()), "Inventory Level")
+    # 4. Column Detection
+    demand_col = next((c for c in df.columns if any(x in c.lower() for x in ["actual", "demand", "sold"])), None)
+    pred_col = next((c for c in df.columns if any(x in c.lower() for x in ["pred", "forecast"])), None)
 
-    # --- SIDEBAR FILTERS ---
-    st.sidebar.header("🔍 Filters")
-    if cat_col:
-        selected_cat = st.sidebar.multiselect("Category", df[cat_col].unique(), default=df[cat_col].unique())
-        df = df[df[cat_col].isin(selected_cat)]
-
-    # --- TOP KPI METRICS ---
-    st.subheader("📌 Key Performance Indicators")
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    
-    with kpi1:
-        st.metric("Total Demand", f"{int(df[demand_col].sum()):,}")
-    with kpi2:
-        if pred_col:
-            acc = 100 - (abs(df[demand_col] - df[pred_col]).mean() / df[demand_col].mean() * 100)
-            st.metric("AI Accuracy", f"{acc:.1f}%")
-    with kpi3:
-        peak = int(df[demand_col].max())
-        st.metric("Peak Demand", f"{peak:,}")
-    with kpi4:
-        if 'Stock_Status' in df.columns:
-            critical = len(df[df['Stock_Status'] == 'Critical Low'])
-            st.metric("Critical Items", critical, delta="- Action Required", delta_color="inverse")
-
-    st.markdown("---")
-
-    # --- TABS FOR PROFESSIONAL LAYOUT ---
-    tab1, tab2, tab3 = st.tabs(["📈 Forecasting Trends", "📊 Product Insights", "🚨 Inventory Planning"])
-
-    with tab1:
-        st.subheader("AI Demand Forecast vs Actual")
-        # Line chart using Plotly for "Professional" look
-        fig_trend = px.line(df.tail(100), x=date_col, y=[demand_col, pred_col] if pred_col else [demand_col],
-                            color_discrete_map={demand_col: "#0077b6", pred_col: "#ffb703"},
-                            template="plotly_white")
-        fig_trend.update_layout(hovermode="x unified")
-        st.plotly_chart(fig_trend, use_container_width=True)
-
-    with tab2:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Demand by Category")
-            if cat_col:
-                cat_sum = df.groupby(cat_col)[demand_col].sum().reset_index()
-                fig_bar = px.bar(cat_sum, x=cat_col, y=demand_col, color=demand_col, color_continuous_scale="Blues")
-                st.plotly_chart(fig_bar, use_container_width=True)
-        with c2:
-            st.subheader("Stock Status Ratio")
-            if 'Stock_Status' in df.columns:
-                status_pie = px.pie(df, names='Stock_Status', hole=0.5, color='Stock_Status',
-                                    color_discrete_map={'Healthy': '#2a9d8f', 'Critical Low': '#e76f51', 'Low Warning': '#e9c46a'})
-                st.plotly_chart(status_pie, use_container_width=True)
-
-    with tab3:
-        st.subheader("Actionable Inventory Suggestions")
-        st.markdown("This table identifies items where the **AI-Predicted Demand** exceeds your current stock.")
+    # 5. UI Layout
+    if demand_col:
+        st.success(f"Detected Demand Column: {demand_col}")
         
-        # Display the Reorder List
-        cols_to_show = [c for c in [date_col, 'Product ID', cat_col, stock_col, demand_col, pred_col, 'Suggested_Order'] if c in df.columns]
-        st.dataframe(df[cols_to_show].sort_values(by=pred_col, ascending=False).head(20), use_container_width=True)
+        # KPI Row
+        k1, k2 = st.columns(2)
+        k1.metric("Total Demand", f"{int(df[demand_col].sum()):,}")
+        if pred_col:
+            k2.metric("Predicted Demand", f"{int(df[pred_col].sum()):,}")
 
-        # DOWNLOAD BUTTON
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Download Full Inventory Report", csv, "inventory_report.csv", "text/csv")
+        # Charts
+        st.subheader("📈 Demand Trend")
+        fig = px.line(df.tail(100), x=date_col if date_col else df.index, 
+                      y=[demand_col, pred_col] if pred_col else [demand_col])
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("Could not find a 'Demand' or 'Units Sold' column in your file.")
 
 else:
-    st.warning("👈 Please upload the CSV file generated by your AI model script.")
+    st.info("Please upload a CSV file to begin.")
