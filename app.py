@@ -3,220 +3,111 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 
-# -------------------- PAGE CONFIG --------------------
-st.set_page_config(
-    page_title="Smart Inventory Forecast Dashboard",
-    page_icon="📦",
-    layout="wide"
-)
+# 1. PAGE CONFIG
+st.set_page_config(page_title="AI Inventory Dashboard", page_icon="📦", layout="wide")
 
-# -------------------- BACKGROUND & STYLE --------------------
+# 2. CUSTOM CSS FOR CARDS
 st.markdown("""
 <style>
-.stApp {
-    background: linear-gradient(135deg, #cce7ff, #f5fbff);
-}
-.card {
-    padding: 20px;
-    border-radius: 18px;
-    background: white;
-    box-shadow: 0px 8px 25px rgba(0,0,0,0.1);
-    text-align: center;
-}
-.metric-title {
-    font-size: 16px;
-    color: gray;
-}
-.metric-value {
-    font-size: 32px;
-    font-weight: bold;
-    color: #0077b6;
-}
+    .stMetric {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------- TITLE --------------------
-st.markdown("""
-<h1 style='text-align:center; color:#023e8a;'>📊 Smart Demand Forecast & Inventory Dashboard</h1>
-<p style='text-align:center; color:gray;'>
-Upload your sales dataset to analyze demand, trends, and inventory needs
-</p>
-""", unsafe_allow_html=True)
+# 3. HEADER
+st.title("📊 Smart Demand Forecast & Inventory Control")
+st.markdown("---")
 
-# -------------------- FILE UPLOAD --------------------
-uploaded_file = st.file_uploader(
-    "📂 Upload CSV File",
-    type=["csv"]
-)
+# 4. FILE UPLOADER
+uploaded_file = st.sidebar.file_uploader("📂 Upload Processed CSV", type=["csv"])
 
-if uploaded_file is None:
-    st.info("""
-### 📌 Required Columns (Minimum)
-- Product / Category
-- Date
-- Units Sold or Demand
-- Price / Discount (optional)
-- Region (optional)
-
-Once uploaded, dashboards will appear automatically.
-""")
-    st.stop()
-
-# -------------------- LOAD DATA --------------------
-df = pd.read_csv(uploaded_file)
-
-# -------------------- DATE HANDLING --------------------
-date_col = None
-for col in df.columns:
-    if "date" in col.lower():
-        date_col = col
-        df[col] = pd.to_datetime(df[col])
-        break
-
-# -------------------- BASIC COLUMN DETECTION --------------------
-demand_col = None
-for col in df.columns:
-    if "sold" in col.lower() or "demand" in col.lower():
-        demand_col = col
-        break
-
-product_col = None
-for col in df.columns:
-    if "product" in col.lower() or "sub" in col.lower():
-        product_col = col
-        break
-
-category_col = None
-for col in df.columns:
-    if "category" in col.lower():
-        category_col = col
-        break
-
-# -------------------- SIDEBAR FILTERS --------------------
-st.sidebar.header("🎛 Filters")
-
-if category_col:
-    categories = st.sidebar.multiselect(
-        "Select Category",
-        df[category_col].unique(),
-        default=df[category_col].unique()
-    )
-    df = df[df[category_col].isin(categories)]
-
-if product_col:
-    products = st.sidebar.multiselect(
-        "Select Product",
-        df[product_col].unique(),
-        default=df[product_col].unique()
-    )
-    df = df[df[product_col].isin(products)]
-
-# -------------------- KPI METRICS --------------------
-total_demand = int(df[demand_col].sum())
-avg_demand = int(df[demand_col].mean())
-max_demand = int(df[demand_col].max())
-
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-title">Total Demand</div>
-        <div class="metric-value">{total_demand}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c2:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-title">Average Demand</div>
-        <div class="metric-value">{avg_demand}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with c3:
-    st.markdown(f"""
-    <div class="card">
-        <div class="metric-title">Peak Demand</div>
-        <div class="metric-value">{max_demand}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# -------------------- TABS --------------------
-tab1, tab2, tab3 = st.tabs(["📈 Demand Trends", "📊 Product Comparison", "📦 Inventory Planning"])
-
-# -------------------- TAB 1: LINE CHART --------------------
-with tab1:
-    st.subheader("Demand Over Time")
+if uploaded_file:
+    # Load Data
+    df = pd.read_csv(uploaded_file)
+    
+    # --- ROBUST DATE HANDLING ---
+    # This prevents the ValueError you saw earlier
+    date_col = next((c for c in df.columns if "date" in c.lower()), None)
     if date_col:
-        trend = df.groupby(date_col)[demand_col].sum().reset_index()
-        fig = px.line(
-            trend,
-            x=date_col,
-            y=demand_col,
-            markers=True,
-            template="plotly_white"
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("No Date column found")
+        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
+        df = df.dropna(subset=[date_col]) # Remove rows that failed to convert
+        df = df.sort_values(by=date_col)
 
-# -------------------- TAB 2: BAR + PIE --------------------
-with tab2:
-    c1, c2 = st.columns(2)
+    # --- AUTOMATIC COLUMN DETECTION ---
+    demand_col = next((c for c in df.columns if "actual" in c.lower() or "demand" in c.lower() or "sold" in c.lower()), None)
+    pred_col = next((c for c in df.columns if "pred" in c.lower() or "forecast" in c.lower()), None)
+    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
+    stock_col = next((c for c in df.columns if "inventory" in c.lower() or "stock" in c.lower()), "Inventory Level")
 
-    with c1:
-        st.subheader("Demand by Product")
-        prod_summary = df.groupby(product_col)[demand_col].sum().reset_index()
-        fig = px.bar(
-            prod_summary,
-            x=product_col,
-            y=demand_col,
-            color=demand_col,
-            template="plotly_white"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    # --- SIDEBAR FILTERS ---
+    st.sidebar.header("🔍 Filters")
+    if cat_col:
+        selected_cat = st.sidebar.multiselect("Category", df[cat_col].unique(), default=df[cat_col].unique())
+        df = df[df[cat_col].isin(selected_cat)]
 
-    with c2:
-        st.subheader("Category Contribution")
-        if category_col:
-            cat_summary = df.groupby(category_col)[demand_col].sum().reset_index()
-            fig = px.pie(
-                cat_summary,
-                names=category_col,
-                values=demand_col,
-                hole=0.45
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    # --- TOP KPI METRICS ---
+    st.subheader("📌 Key Performance Indicators")
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    
+    with kpi1:
+        st.metric("Total Demand", f"{int(df[demand_col].sum()):,}")
+    with kpi2:
+        if pred_col:
+            acc = 100 - (abs(df[demand_col] - df[pred_col]).mean() / df[demand_col].mean() * 100)
+            st.metric("AI Accuracy", f"{acc:.1f}%")
+    with kpi3:
+        peak = int(df[demand_col].max())
+        st.metric("Peak Demand", f"{peak:,}")
+    with kpi4:
+        if 'Stock_Status' in df.columns:
+            critical = len(df[df['Stock_Status'] == 'Critical Low'])
+            st.metric("Critical Items", critical, delta="- Action Required", delta_color="inverse")
 
-# -------------------- TAB 3: INVENTORY FORECAST --------------------
-with tab3:
-    st.subheader("Inventory Recommendation")
+    st.markdown("---")
 
-    # Simple forecast logic
-    df["Predicted_Demand"] = df[demand_col].rolling(3).mean().fillna(df[demand_col])
-    df["Safety_Stock"] = df["Predicted_Demand"] * 0.2
-    df["Reorder_Point"] = df["Predicted_Demand"] + df["Safety_Stock"]
+    # --- TABS FOR PROFESSIONAL LAYOUT ---
+    tab1, tab2, tab3 = st.tabs(["📈 Forecasting Trends", "📊 Product Insights", "🚨 Inventory Planning"])
 
-    st.dataframe(
-        df[[product_col, demand_col, "Predicted_Demand", "Reorder_Point"]]
-        .sort_values("Reorder_Point", ascending=False)
-        .head(20),
-        use_container_width=True
-    )
+    with tab1:
+        st.subheader("AI Demand Forecast vs Actual")
+        # Line chart using Plotly for "Professional" look
+        fig_trend = px.line(df.tail(100), x=date_col, y=[demand_col, pred_col] if pred_col else [demand_col],
+                            color_discrete_map={demand_col: "#0077b6", pred_col: "#ffb703"},
+                            template="plotly_white")
+        fig_trend.update_layout(hovermode="x unified")
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-# -------------------- DOWNLOAD --------------------
-st.download_button(
-    "⬇ Download Forecast Results",
-    df.to_csv(index=False),
-    "inventory_forecast.csv",
-    "text/csv"
-)
+    with tab2:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Demand by Category")
+            if cat_col:
+                cat_sum = df.groupby(cat_col)[demand_col].sum().reset_index()
+                fig_bar = px.bar(cat_sum, x=cat_col, y=demand_col, color=demand_col, color_continuous_scale="Blues")
+                st.plotly_chart(fig_bar, use_container_width=True)
+        with c2:
+            st.subheader("Stock Status Ratio")
+            if 'Stock_Status' in df.columns:
+                status_pie = px.pie(df, names='Stock_Status', hole=0.5, color='Stock_Status',
+                                    color_discrete_map={'Healthy': '#2a9d8f', 'Critical Low': '#e76f51', 'Low Warning': '#e9c46a'})
+                st.plotly_chart(status_pie, use_container_width=True)
 
-# -------------------- FOOTER --------------------
-st.markdown("""
-<hr>
-<p style='text-align:center; color:gray;'>
-Built with ❤️ using AI-powered demand forecasting
-</p>
-""", unsafe_allow_html=True)
+    with tab3:
+        st.subheader("Actionable Inventory Suggestions")
+        st.markdown("This table identifies items where the **AI-Predicted Demand** exceeds your current stock.")
+        
+        # Display the Reorder List
+        cols_to_show = [c for c in [date_col, 'Product ID', cat_col, stock_col, demand_col, pred_col, 'Suggested_Order'] if c in df.columns]
+        st.dataframe(df[cols_to_show].sort_values(by=pred_col, ascending=False).head(20), use_container_width=True)
+
+        # DOWNLOAD BUTTON
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Download Full Inventory Report", csv, "inventory_report.csv", "text/csv")
+
+else:
+    st.warning("👈 Please upload the CSV file generated by your AI model script.")
