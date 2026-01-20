@@ -1,148 +1,222 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.express as px
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
-    page_title="Inventory Demand Forecasting",
+    page_title="Smart Inventory Forecast Dashboard",
     page_icon="📦",
     layout="wide"
 )
 
-# -------------------- SKY BLUE THEME --------------------
+# -------------------- BACKGROUND & STYLE --------------------
 st.markdown("""
 <style>
 .stApp {
-    background-color: #EAF6FF;
+    background: linear-gradient(135deg, #cce7ff, #f5fbff);
 }
-h1, h2, h3 {
-    color: #003366;
+.card {
+    padding: 20px;
+    border-radius: 18px;
+    background: white;
+    box-shadow: 0px 8px 25px rgba(0,0,0,0.1);
+    text-align: center;
 }
-div[data-testid="metric-container"] {
-    background-color: #D6ECFF;
-    border-radius: 12px;
-    padding: 15px;
-    box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
+.metric-title {
+    font-size: 16px;
+    color: gray;
+}
+.metric-value {
+    font-size: 32px;
+    font-weight: bold;
+    color: #0077b6;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # -------------------- TITLE --------------------
-st.title("📦 Smart Inventory Demand Forecasting Dashboard")
-st.markdown(
-    "Upload your **historical sales dataset** to analyze **actual demand, predicted demand, and inventory decisions**."
-)
-
-# -------------------- REQUIRED COLUMNS INFO --------------------
-with st.expander("📌 Dataset Requirements"):
-    st.write("""
-Your file should contain **at least** these columns:
-- Date  
-- Product ID  
-- Category  
-- Units Sold  
-- Actual_Demand *(or Units Sold used as demand)*  
-- Predicted_Demand *(optional, if model already trained)*  
-- Seasonality *(optional)*  
-""")
+st.markdown("""
+<h1 style='text-align:center; color:#023e8a;'>📊 Smart Demand Forecast & Inventory Dashboard</h1>
+<p style='text-align:center; color:gray;'>
+Upload your sales dataset to analyze demand, trends, and inventory needs
+</p>
+""", unsafe_allow_html=True)
 
 # -------------------- FILE UPLOAD --------------------
 uploaded_file = st.file_uploader(
-    "📂 Upload CSV or Excel file",
-    type=["csv", "xlsx"]
+    "📂 Upload CSV File",
+    type=["csv"]
 )
 
-if uploaded_file is not None:
-    # -------------------- READ DATA --------------------
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        df = pd.read_excel(uploaded_file)
+if uploaded_file is None:
+    st.info("""
+### 📌 Required Columns (Minimum)
+- Product / Category
+- Date
+- Units Sold or Demand
+- Price / Discount (optional)
+- Region (optional)
 
-    st.success("✅ File uploaded successfully")
+Once uploaded, dashboards will appear automatically.
+""")
+    st.stop()
 
-    # -------------------- DATA CLEANING --------------------
-    df.columns = df.columns.str.strip()
+# -------------------- LOAD DATA --------------------
+df = pd.read_csv(uploaded_file)
 
-    if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"])
+# -------------------- DATE HANDLING --------------------
+date_col = None
+for col in df.columns:
+    if "date" in col.lower():
+        date_col = col
+        df[col] = pd.to_datetime(df[col])
+        break
 
-    if "Actual_Demand" not in df.columns:
-        df["Actual_Demand"] = df["Units Sold"]
+# -------------------- BASIC COLUMN DETECTION --------------------
+demand_col = None
+for col in df.columns:
+    if "sold" in col.lower() or "demand" in col.lower():
+        demand_col = col
+        break
 
-    if "Predicted_Demand" not in df.columns:
-        df["Predicted_Demand"] = df["Actual_Demand"].rolling(3).mean().fillna(df["Actual_Demand"])
+product_col = None
+for col in df.columns:
+    if "product" in col.lower() or "sub" in col.lower():
+        product_col = col
+        break
 
-    # -------------------- SIDEBAR FILTERS --------------------
-    st.sidebar.header("🔍 Filters")
+category_col = None
+for col in df.columns:
+    if "category" in col.lower():
+        category_col = col
+        break
 
-    category = st.sidebar.selectbox(
+# -------------------- SIDEBAR FILTERS --------------------
+st.sidebar.header("🎛 Filters")
+
+if category_col:
+    categories = st.sidebar.multiselect(
         "Select Category",
-        df["Category"].unique()
+        df[category_col].unique(),
+        default=df[category_col].unique()
     )
+    df = df[df[category_col].isin(categories)]
 
-    product = st.sidebar.selectbox(
+if product_col:
+    products = st.sidebar.multiselect(
         "Select Product",
-        df[df["Category"] == category]["Product ID"].unique()
+        df[product_col].unique(),
+        default=df[product_col].unique()
+    )
+    df = df[df[product_col].isin(products)]
+
+# -------------------- KPI METRICS --------------------
+total_demand = int(df[demand_col].sum())
+avg_demand = int(df[demand_col].mean())
+max_demand = int(df[demand_col].max())
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
+    st.markdown(f"""
+    <div class="card">
+        <div class="metric-title">Total Demand</div>
+        <div class="metric-value">{total_demand}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with c2:
+    st.markdown(f"""
+    <div class="card">
+        <div class="metric-title">Average Demand</div>
+        <div class="metric-value">{avg_demand}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+with c3:
+    st.markdown(f"""
+    <div class="card">
+        <div class="metric-title">Peak Demand</div>
+        <div class="metric-value">{max_demand}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# -------------------- TABS --------------------
+tab1, tab2, tab3 = st.tabs(["📈 Demand Trends", "📊 Product Comparison", "📦 Inventory Planning"])
+
+# -------------------- TAB 1: LINE CHART --------------------
+with tab1:
+    st.subheader("Demand Over Time")
+    if date_col:
+        trend = df.groupby(date_col)[demand_col].sum().reset_index()
+        fig = px.line(
+            trend,
+            x=date_col,
+            y=demand_col,
+            markers=True,
+            template="plotly_white"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No Date column found")
+
+# -------------------- TAB 2: BAR + PIE --------------------
+with tab2:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("Demand by Product")
+        prod_summary = df.groupby(product_col)[demand_col].sum().reset_index()
+        fig = px.bar(
+            prod_summary,
+            x=product_col,
+            y=demand_col,
+            color=demand_col,
+            template="plotly_white"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with c2:
+        st.subheader("Category Contribution")
+        if category_col:
+            cat_summary = df.groupby(category_col)[demand_col].sum().reset_index()
+            fig = px.pie(
+                cat_summary,
+                names=category_col,
+                values=demand_col,
+                hole=0.45
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+# -------------------- TAB 3: INVENTORY FORECAST --------------------
+with tab3:
+    st.subheader("Inventory Recommendation")
+
+    # Simple forecast logic
+    df["Predicted_Demand"] = df[demand_col].rolling(3).mean().fillna(df[demand_col])
+    df["Safety_Stock"] = df["Predicted_Demand"] * 0.2
+    df["Reorder_Point"] = df["Predicted_Demand"] + df["Safety_Stock"]
+
+    st.dataframe(
+        df[[product_col, demand_col, "Predicted_Demand", "Reorder_Point"]]
+        .sort_values("Reorder_Point", ascending=False)
+        .head(20),
+        use_container_width=True
     )
 
-    filtered_df = df[
-        (df["Category"] == category) &
-        (df["Product ID"] == product)
-    ]
+# -------------------- DOWNLOAD --------------------
+st.download_button(
+    "⬇ Download Forecast Results",
+    df.to_csv(index=False),
+    "inventory_forecast.csv",
+    "text/csv"
+)
 
-    # -------------------- KPI METRICS --------------------
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric(
-        "📈 Avg Actual Demand",
-        round(filtered_df["Actual_Demand"].mean(), 2)
-    )
-
-    col2.metric(
-        "🔮 Avg Predicted Demand",
-        round(filtered_df["Predicted_Demand"].mean(), 2)
-    )
-
-    col3.metric(
-        "📦 Total Units Sold",
-        int(filtered_df["Units Sold"].sum())
-    )
-
-    st.divider()
-
-    # -------------------- LINE CHART --------------------
-    st.subheader("📊 Demand Trend Over Time")
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(filtered_df["Date"], filtered_df["Actual_Demand"], label="Actual Demand", linewidth=2)
-    ax.plot(filtered_df["Date"], filtered_df["Predicted_Demand"], label="Predicted Demand", linestyle="--")
-
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Units")
-    ax.legend()
-    ax.grid(True)
-
-    st.pyplot(fig)
-
-    # -------------------- BAR CHART --------------------
-    st.subheader("📊 Monthly Sales Distribution")
-
-    filtered_df["Month"] = filtered_df["Date"].dt.month
-    monthly_sales = filtered_df.groupby("Month")["Units Sold"].sum()
-
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
-    monthly_sales.plot(kind="bar", ax=ax2)
-    ax2.set_xlabel("Month")
-    ax2.set_ylabel("Units Sold")
-    ax2.grid(axis="y")
-
-    st.pyplot(fig2)
-
-    # -------------------- DATA TABLE --------------------
-    st.subheader("📋 Product-Level Details")
-    st.dataframe(filtered_df, use_container_width=True)
-
-else:
-    st.info("👆 Upload a dataset to begin analysis")
+# -------------------- FOOTER --------------------
+st.markdown("""
+<hr>
+<p style='text-align:center; color:gray;'>
+Built with ❤️ using AI-powered demand forecasting
+</p>
+""", unsafe_allow_html=True)
