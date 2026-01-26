@@ -1,115 +1,210 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import matplotlib.pyplot as plt
 
-# 1. PAGE CONFIG
-st.set_page_config(page_title="AI Inventory Dashboard", page_icon="📦", layout="wide")
+# ================== PAGE CONFIG ==================
+st.set_page_config(
+    page_title="Retail Intelligence Dashboard",
+    page_icon="📊",
+    layout="wide"
+)
 
-# 2. THEME-AWARE CSS
-# Using rgba(128,128,128,0.1) creates a subtle border that works in both modes
+# ================== POWER BI STYLE ==================
 st.markdown("""
 <style>
-    div[data-testid="stMetric"] {
-        background-color: rgba(128, 128, 128, 0.1);
-        border: 1px solid rgba(128, 128, 128, 0.2);
-        padding: 15px;
-        border-radius: 10px;
-    }
+body {
+    background-color: #F5F7FB;
+}
+h1, h2, h3 {
+    font-weight: 700;
+}
+.kpi-card {
+    background: white;
+    padding: 22px;
+    border-radius: 18px;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+    text-align: center;
+}
+.section {
+    background: white;
+    padding: 25px;
+    border-radius: 20px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    margin-bottom: 25px;
+}
+.alert {
+    background-color: #FFEAEA;
+    padding: 15px;
+    border-radius: 14px;
+    border-left: 6px solid #FF4B4B;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# 3. HEADER
-st.title("📊 Smart Demand Forecast & Inventory Control")
-st.write("Upload your AI-processed CSV in the sidebar to view trends and reorder points.")
-st.markdown("---")
+# ================== TITLE ==================
+st.title("📊 Retail Intelligence Dashboard")
+st.caption("Demand Forecasting • Inventory Optimization • Profit Analytics")
 
-# 4. SIDEBAR
-st.sidebar.header("📂 Data Management")
-uploaded_file = st.sidebar.file_uploader("Upload Processed CSV", type=["csv"])
+# ================== FILE UPLOAD ==================
+file = st.file_uploader("📂 Upload Sales Dataset (CSV)", type=["csv"])
+if file is None:
+    st.stop()
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    
-    # Date Handling
-    date_col = next((c for c in df.columns if "date" in c.lower()), None)
-    if date_col:
-        df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
-        df = df.dropna(subset=[date_col]).sort_values(by=date_col)
+df = pd.read_csv(file)
 
-    # Column Detection
-    demand_col = next((c for c in df.columns if any(x in c.lower() for x in ["actual", "demand", "sold"])), None)
-    pred_col = next((c for c in df.columns if any(x in c.lower() for x in ["pred", "forecast"])), None)
-    cat_col = next((c for c in df.columns if "category" in c.lower()), None)
-    region_col = next((c for c in df.columns if "region" in c.lower()), None)
-    stock_col = next((c for c in df.columns if any(x in c.lower() for x in ["inventory", "stock"])), "Inventory Level")
+# ================== COLUMN SELECTION ==================
+st.sidebar.header("🔧 Column Mapping")
 
-    # Sidebar Filters
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔍 Filter View")
-    filtered_df = df.copy()
-    if cat_col:
-        selected_cat = st.sidebar.multiselect("Category", df[cat_col].unique(), default=df[cat_col].unique())
-        filtered_df = filtered_df[filtered_df[cat_col].isin(selected_cat)]
-    
-    if region_col:
-        selected_region = st.sidebar.multiselect("Region", df[region_col].unique(), default=df[region_col].unique())
-        filtered_df = filtered_df[filtered_df[region_col].isin(selected_region)]
+date_col = st.sidebar.selectbox("Date", df.columns)
+product_col = st.sidebar.selectbox("Product", df.columns)
+category_col = st.sidebar.selectbox("Category", df.columns)
+demand_col = st.sidebar.selectbox("Units Sold", df.columns)
+price_col = st.sidebar.selectbox("Selling Price", df.columns)
 
-    # Metrics Row
-    st.subheader("📌 Executive Summary")
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        st.metric("Total Actual Demand", f"{int(filtered_df[demand_col].sum()):,}")
-    with k2:
-        if pred_col:
-            mae = abs(filtered_df[demand_col] - filtered_df[pred_col]).mean()
-            # Safety check for division by zero
-            mean_demand = filtered_df[demand_col].mean()
-            acc = max(0, 100 - (mae / mean_demand * 100)) if mean_demand != 0 else 0
-            st.metric("Model Accuracy", f"{acc:.1f}%")
-    with k3:
-        st.metric("Peak Daily Demand", f"{int(filtered_df[demand_col].max()):,}")
-    with k4:
-        st.metric("Total Records", f"{len(filtered_df):,}")
+cost_col = st.sidebar.selectbox(
+    "Cost Price (Optional)",
+    ["None"] + list(df.columns)
+)
 
-    st.markdown("---")
+inventory_col = st.sidebar.selectbox(
+    "Inventory (Optional)",
+    ["None"] + list(df.columns)
+)
 
-    # Tabs
-    tab1, tab2, tab3 = st.tabs(["📈 Forecasting Trends", "📊 Product Insights", "🚨 Inventory Planning"])
+# ================== DATA PREP ==================
+df[date_col] = pd.to_datetime(df[date_col])
+df["Year"] = df[date_col].dt.year
+df["Month"] = df[date_col].dt.to_period("M").astype(str)
 
-    with tab1:
-        st.subheader("Demand Trend Analysis")
-        # Removing template="plotly_white" allows it to follow Streamlit's theme
-        fig_trend = px.line(filtered_df.tail(100), x=date_col, 
-                            y=[demand_col, pred_col] if pred_col else [demand_col],
-                            color_discrete_map={demand_col: "#0077b6", pred_col: "#fb8500"})
-        fig_trend.update_layout(hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02))
-        st.plotly_chart(fig_trend, use_container_width=True)
+# ================== SIDEBAR FILTERS ==================
+st.sidebar.header("🎯 Filters")
 
-    with tab2:
-        c1, c2 = st.columns(2)
-        with c1:
-            if cat_col:
-                st.write("#### Demand by Category")
-                cat_sum = filtered_df.groupby(cat_col)[demand_col].sum().reset_index()
-                fig_bar = px.bar(cat_sum, x=cat_col, y=demand_col, color=demand_col, color_continuous_scale="Blues")
-                st.plotly_chart(fig_bar, use_container_width=True)
-        with c2:
-            if region_col:
-                st.write("#### Regional Market Share")
-                region_sum = filtered_df.groupby(region_col)[demand_col].sum().reset_index()
-                fig_pie = px.pie(region_sum, names=region_col, values=demand_col, hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True)
+selected_category = st.sidebar.selectbox(
+    "Select Category",
+    ["All"] + sorted(df[category_col].astype(str).unique())
+)
 
-    with tab3:
-        st.subheader("🚨 Stock Reorder Recommendations")
-        cols_to_show = [c for c in [date_col, 'Product ID', cat_col, region_col, stock_col, pred_col, 'Suggested_Order'] if c in filtered_df.columns]
-        st.dataframe(filtered_df[cols_to_show].sort_values(by=date_col, ascending=False).head(25), use_container_width=True)
-        
-        csv = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button("⬇️ Download Analysis", csv, "inventory_analysis.csv", "text/csv")
+time_view = st.sidebar.radio("Time View", ["Monthly", "Yearly"])
+
+filtered_df = df.copy()
+if selected_category != "All":
+    filtered_df = filtered_df[filtered_df[category_col] == selected_category]
+
+# ================== KPI SECTION ==================
+st.markdown("<div class='section'>", unsafe_allow_html=True)
+st.subheader("📌 Key Performance Indicators")
+
+col1, col2, col3, col4 = st.columns(4)
+
+total_demand = filtered_df[demand_col].sum()
+total_revenue = (filtered_df[demand_col] * filtered_df[price_col]).sum()
+
+with col1:
+    st.markdown(f"<div class='kpi-card'><h4>Total Demand</h4><h2>{int(total_demand):,}</h2></div>", unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"<div class='kpi-card'><h4>Total Revenue</h4><h2>₹ {int(total_revenue):,}</h2></div>", unsafe_allow_html=True)
+
+with col3:
+    avg_price = filtered_df[price_col].mean()
+    st.markdown(f"<div class='kpi-card'><h4>Avg Price</h4><h2>₹ {avg_price:.2f}</h2></div>", unsafe_allow_html=True)
+
+with col4:
+    st.markdown(f"<div class='kpi-card'><h4>Categories</h4><h2>{filtered_df[category_col].nunique()}</h2></div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ================== CATEGORY DASHBOARD ==================
+st.markdown("<div class='section'>", unsafe_allow_html=True)
+st.subheader("📦 Category-wise Performance")
+
+cat_perf = (
+    filtered_df
+    .groupby(category_col)
+    .agg({
+        demand_col: "sum",
+        price_col: "mean"
+    })
+    .reset_index()
+)
+
+cat_perf["Revenue"] = cat_perf[demand_col] * cat_perf[price_col]
+
+st.dataframe(cat_perf, use_container_width=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ================== DEMAND TREND ==================
+st.markdown("<div class='section'>", unsafe_allow_html=True)
+st.subheader("📈 Demand Trend")
+
+if time_view == "Monthly":
+    trend = filtered_df.groupby("Month")[demand_col].sum()
+else:
+    trend = filtered_df.groupby("Year")[demand_col].sum()
+
+fig, ax = plt.subplots()
+trend.plot(ax=ax, marker="o")
+ax.set_ylabel("Units Sold")
+ax.grid(True)
+plt.xticks(rotation=45)
+
+st.pyplot(fig)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ================== PROFIT OPTIMIZATION ==================
+st.markdown("<div class='section'>", unsafe_allow_html=True)
+st.subheader("💰 Profit Optimization")
+
+if cost_col != "None":
+    filtered_df["Profit"] = (
+        filtered_df[price_col] - filtered_df[cost_col]
+    ) * filtered_df[demand_col]
+
+    profit_by_product = (
+        filtered_df
+        .groupby(product_col)["Profit"]
+        .sum()
+        .reset_index()
+        .sort_values("Profit", ascending=False)
+    )
+
+    st.markdown("### 🔝 Top Profitable Products")
+    st.dataframe(profit_by_product.head(10), use_container_width=True)
+
+    st.markdown("### ⚠️ Low / Loss-Making Products")
+    st.dataframe(profit_by_product.tail(10), use_container_width=True)
 
 else:
-    st.info("### 👈 Get Started: Upload your CSV in the sidebar.")
-    st.write("If you switch to Dark Mode, the charts and text will now adapt automatically.")
+    st.info("ℹ️ Cost price not provided — profit optimization skipped")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ================== INVENTORY ALERT ==================
+st.markdown("<div class='section'>", unsafe_allow_html=True)
+st.subheader("🚨 Inventory Risk Alerts")
+
+if inventory_col != "None":
+    latest_stock = (
+        df.sort_values(date_col)
+        .groupby(product_col)
+        .tail(1)
+    )
+
+    risk = latest_stock[
+        latest_stock[inventory_col] < latest_stock[demand_col]
+    ]
+
+    if len(risk) > 0:
+        st.markdown("<div class='alert'><b>Inventory Shortage Detected</b></div>", unsafe_allow_html=True)
+        st.dataframe(
+            risk[[product_col, inventory_col, demand_col]],
+            use_container_width=True
+        )
+    else:
+        st.success("✅ Inventory levels are healthy")
+else:
+    st.info("ℹ️ Inventory column not selected")
+
+st.markdown("</div>", unsafe_allow_html=True)
