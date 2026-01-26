@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+
 
 # ================== PAGE CONFIG ==================
 st.set_page_config(
@@ -208,3 +208,4 @@ else:
     st.info("ℹ️ Inventory column not selected")
 
 st.markdown("</div>", unsafe_allow_html=True)
+
