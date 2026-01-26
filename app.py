@@ -1,224 +1,227 @@
+# ==============================
+# Retail Demand & Inventory App
+# ==============================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import LabelEncoder
 
-
-# ================== PAGE CONFIG ==================
+# ------------------------------
+# PAGE CONFIG
+# ------------------------------
 st.set_page_config(
-    page_title="Retail Intelligence Dashboard",
-    page_icon="📊",
-    layout="wide"
+    page_title="Retail Demand Intelligence",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# ================== POWER BI STYLE ==================
+# ------------------------------
+# CUSTOM CSS (Power BI style)
+# ------------------------------
 st.markdown("""
 <style>
 body {
-    background-color: #F5F7FB;
+    background: linear-gradient(to right, #e0f2ff, #f5fbff);
 }
-h1, h2, h3 {
-    font-weight: 700;
-}
-.kpi-card {
-    background: white;
-    padding: 22px;
-    border-radius: 18px;
-    box-shadow: 0 8px 18px rgba(0,0,0,0.08);
+.metric-card {
+    background-color: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0px 4px 15px rgba(0,0,0,0.08);
     text-align: center;
-}
-.section {
-    background: white;
-    padding: 25px;
-    border-radius: 20px;
-    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
-    margin-bottom: 25px;
-}
-.alert {
-    background-color: #FFEAEA;
-    padding: 15px;
-    border-radius: 14px;
-    border-left: 6px solid #FF4B4B;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# ================== TITLE ==================
-st.title("📊 Retail Intelligence Dashboard")
-st.caption("Demand Forecasting • Inventory Optimization • Profit Analytics")
+# ------------------------------
+# TITLE
+# ------------------------------
+st.title("📊 Retail Demand & Inventory Intelligence Dashboard")
+st.caption("AI-based demand forecasting, inventory optimization & alerts")
 
-# ================== FILE UPLOAD ==================
-file = st.file_uploader("📂 Upload Sales Dataset (CSV)", type=["csv"])
-if file is None:
-    st.stop()
+# ------------------------------
+# LOAD DATA
+# ------------------------------
+@st.cache_data
+def load_data():
+    df = pd.read_csv("data.csv")
+    return df
 
-df = pd.read_csv(file)
+df = load_data()
 
-# ================== COLUMN SELECTION ==================
-st.sidebar.header("🔧 Column Mapping")
-
-date_col = st.sidebar.selectbox("Date", df.columns)
-product_col = st.sidebar.selectbox("Product", df.columns)
-category_col = st.sidebar.selectbox("Category", df.columns)
-demand_col = st.sidebar.selectbox("Units Sold", df.columns)
-price_col = st.sidebar.selectbox("Selling Price", df.columns)
-
-cost_col = st.sidebar.selectbox(
-    "Cost Price (Optional)",
-    ["None"] + list(df.columns)
-)
-
-inventory_col = st.sidebar.selectbox(
-    "Inventory (Optional)",
-    ["None"] + list(df.columns)
-)
-
-# ================== DATA PREP ==================
+# ------------------------------
+# DATE HANDLING (SAFE)
+# ------------------------------
 date_col = "Date"
+df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+df = df.dropna(subset=[date_col])
 
-# Convert everything to string first
-df[date_col] = df[date_col].astype(str)
+df["YearMonth"] = df[date_col].dt.to_period("M").astype(str)
 
-# Parse safely
-df[date_col] = pd.to_datetime(
-    df[date_col],
-    errors="coerce",
-    dayfirst=True
+# ------------------------------
+# MONTHLY AGGREGATION
+# ------------------------------
+monthly_df = df.groupby(
+    ["Product ID", "Category", "Region", "YearMonth"]
+).agg({
+    "Units Sold": "sum",
+    "Inventory Level": "mean",
+    "Price": "mean",
+    "Discount": "mean",
+    "Competitor Pricing": "mean",
+    "Holiday/Promotion": "sum"
+}).reset_index()
+
+# ------------------------------
+# FEATURE ENGINEERING
+# ------------------------------
+monthly_df["Lag_1"] = monthly_df.groupby("Product ID")["Units Sold"].shift(1)
+monthly_df["Lag_3"] = monthly_df.groupby("Product ID")["Units Sold"].shift(3)
+monthly_df["Rolling_3"] = (
+    monthly_df.groupby("Product ID")["Units Sold"]
+    .rolling(3).mean()
+    .reset_index(0, drop=True)
 )
 
-# Remove invalid rows
-df = df[df[date_col].notna()]
+monthly_df = monthly_df.dropna()
 
+# ------------------------------
+# ENCODING
+# ------------------------------
+encoders = {}
+for col in ["Product ID", "Category", "Region"]:
+    le = LabelEncoder()
+    monthly_df[col] = le.fit_transform(monthly_df[col])
+    encoders[col] = le
 
-# ================== SIDEBAR FILTERS ==================
-st.sidebar.header("🎯 Filters")
+# ------------------------------
+# MODEL TRAINING
+# ------------------------------
+features = [
+    "Inventory Level", "Price", "Discount",
+    "Competitor Pricing", "Holiday/Promotion",
+    "Lag_1", "Lag_3", "Rolling_3",
+    "Product ID", "Category", "Region"
+]
+
+X = monthly_df[features]
+y = monthly_df["Units Sold"]
+
+model = RandomForestRegressor(
+    n_estimators=300,
+    random_state=42
+)
+model.fit(X, y)
+
+monthly_df["Predicted_Demand"] = model.predict(X)
+
+# ------------------------------
+# INVENTORY OPTIMIZATION
+# ------------------------------
+LEAD_TIME = 7
+SERVICE_LEVEL = 1.65
+
+monthly_df["Demand_STD"] = monthly_df.groupby("Product ID")["Units Sold"].transform("std")
+monthly_df["Avg_Demand"] = monthly_df.groupby("Product ID")["Units Sold"].transform("mean")
+
+monthly_df["Safety_Stock"] = SERVICE_LEVEL * monthly_df["Demand_STD"] * np.sqrt(LEAD_TIME)
+monthly_df["Reorder_Point"] = (monthly_df["Avg_Demand"] * LEAD_TIME) + monthly_df["Safety_Stock"]
+
+monthly_df["Inventory_Status"] = np.where(
+    monthly_df["Inventory Level"] < monthly_df["Reorder_Point"],
+    "⚠️ Reorder Now",
+    "✅ Safe"
+)
+
+# ------------------------------
+# KPI SECTION
+# ------------------------------
+k1, k2, k3, k4 = st.columns(4)
+
+k1.metric("📦 Total Products", df["Product ID"].nunique())
+k2.metric("📈 Total Units Sold", f"{int(df['Units Sold'].sum()):,}")
+k3.metric("⚠️ Low Stock Alerts",
+          int((monthly_df["Inventory_Status"] == "⚠️ Reorder Now").sum()))
+k4.metric("💰 Avg Monthly Demand",
+          f"{int(monthly_df['Units Sold'].mean()):,}")
+
+# ------------------------------
+# FILTERS
+# ------------------------------
+st.sidebar.header("🔎 Filters")
 
 selected_category = st.sidebar.selectbox(
-    "Select Category",
-    ["All"] + sorted(df[category_col].astype(str).unique())
+    "Category",
+    ["All"] + sorted(df["Category"].unique())
 )
 
-time_view = st.sidebar.radio("Time View", ["Monthly", "Yearly"])
+selected_product = st.sidebar.selectbox(
+    "Product",
+    ["All"] + sorted(df["Product ID"].unique())
+)
 
-filtered_df = df.copy()
+filtered_df = monthly_df.copy()
+
 if selected_category != "All":
-    filtered_df = filtered_df[filtered_df[category_col] == selected_category]
-
-# ================== KPI SECTION ==================
-st.markdown("<div class='section'>", unsafe_allow_html=True)
-st.subheader("📌 Key Performance Indicators")
-
-col1, col2, col3, col4 = st.columns(4)
-
-total_demand = filtered_df[demand_col].sum()
-total_revenue = (filtered_df[demand_col] * filtered_df[price_col]).sum()
-
-with col1:
-    st.markdown(f"<div class='kpi-card'><h4>Total Demand</h4><h2>{int(total_demand):,}</h2></div>", unsafe_allow_html=True)
-
-with col2:
-    st.markdown(f"<div class='kpi-card'><h4>Total Revenue</h4><h2>₹ {int(total_revenue):,}</h2></div>", unsafe_allow_html=True)
-
-with col3:
-    avg_price = filtered_df[price_col].mean()
-    st.markdown(f"<div class='kpi-card'><h4>Avg Price</h4><h2>₹ {avg_price:.2f}</h2></div>", unsafe_allow_html=True)
-
-with col4:
-    st.markdown(f"<div class='kpi-card'><h4>Categories</h4><h2>{filtered_df[category_col].nunique()}</h2></div>", unsafe_allow_html=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ================== CATEGORY DASHBOARD ==================
-st.markdown("<div class='section'>", unsafe_allow_html=True)
-st.subheader("📦 Category-wise Performance")
-
-cat_perf = (
-    filtered_df
-    .groupby(category_col)
-    .agg({
-        demand_col: "sum",
-        price_col: "mean"
-    })
-    .reset_index()
-)
-
-cat_perf["Revenue"] = cat_perf[demand_col] * cat_perf[price_col]
-
-st.dataframe(cat_perf, use_container_width=True)
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ================== DEMAND TREND ==================
-st.markdown("<div class='section'>", unsafe_allow_html=True)
-st.subheader("📈 Demand Trend")
-
-if time_view == "Monthly":
-    trend = filtered_df.groupby("Month")[demand_col].sum()
-else:
-    trend = filtered_df.groupby("Year")[demand_col].sum()
-
-fig, ax = plt.subplots()
-trend.plot(ax=ax, marker="o")
-ax.set_ylabel("Units Sold")
-ax.grid(True)
-plt.xticks(rotation=45)
-
-st.pyplot(fig)
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ================== PROFIT OPTIMIZATION ==================
-st.markdown("<div class='section'>", unsafe_allow_html=True)
-st.subheader("💰 Profit Optimization")
-
-if cost_col != "None":
-    filtered_df["Profit"] = (
-        filtered_df[price_col] - filtered_df[cost_col]
-    ) * filtered_df[demand_col]
-
-    profit_by_product = (
-        filtered_df
-        .groupby(product_col)["Profit"]
-        .sum()
-        .reset_index()
-        .sort_values("Profit", ascending=False)
-    )
-
-    st.markdown("### 🔝 Top Profitable Products")
-    st.dataframe(profit_by_product.head(10), use_container_width=True)
-
-    st.markdown("### ⚠️ Low / Loss-Making Products")
-    st.dataframe(profit_by_product.tail(10), use_container_width=True)
-
-else:
-    st.info("ℹ️ Cost price not provided — profit optimization skipped")
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# ================== INVENTORY ALERT ==================
-st.markdown("<div class='section'>", unsafe_allow_html=True)
-st.subheader("🚨 Inventory Risk Alerts")
-
-if inventory_col != "None":
-    latest_stock = (
-        df.sort_values(date_col)
-        .groupby(product_col)
-        .tail(1)
-    )
-
-    risk = latest_stock[
-        latest_stock[inventory_col] < latest_stock[demand_col]
+    filtered_df = filtered_df[
+        filtered_df["Category"] ==
+        encoders["Category"].transform([selected_category])[0]
     ]
 
-    if len(risk) > 0:
-        st.markdown("<div class='alert'><b>Inventory Shortage Detected</b></div>", unsafe_allow_html=True)
-        st.dataframe(
-            risk[[product_col, inventory_col, demand_col]],
-            use_container_width=True
-        )
-    else:
-        st.success("✅ Inventory levels are healthy")
-else:
-    st.info("ℹ️ Inventory column not selected")
+if selected_product != "All":
+    filtered_df = filtered_df[
+        filtered_df["Product ID"] ==
+        encoders["Product ID"].transform([selected_product])[0]
+    ]
 
-st.markdown("</div>", unsafe_allow_html=True)
+# ------------------------------
+# DEMAND TREND
+# ------------------------------
+st.subheader("📊 Demand Forecast Trend")
 
+trend_df = filtered_df.sort_values("YearMonth")
 
+st.line_chart(
+    trend_df.set_index("YearMonth")[["Units Sold", "Predicted_Demand"]]
+)
+
+# ------------------------------
+# CATEGORY WISE DEMAND
+# ------------------------------
+st.subheader("🗂 Category-Wise Demand")
+
+cat_df = df.groupby("Category")["Units Sold"].sum().sort_values(ascending=False)
+st.bar_chart(cat_df)
+
+# ------------------------------
+# INVENTORY ALERTS TABLE
+# ------------------------------
+st.subheader("🚨 Inventory Shortage Alerts")
+
+alert_df = filtered_df[
+    filtered_df["Inventory_Status"] == "⚠️ Reorder Now"
+][[
+    "Product ID",
+    "Inventory Level",
+    "Reorder_Point",
+    "Safety_Stock",
+    "Inventory_Status"
+]]
+
+st.dataframe(alert_df, use_container_width=True)
+
+# ------------------------------
+# PROFIT INSIGHTS
+# ------------------------------
+st.subheader("💰 Profit Optimization Insight")
+
+profit_df = df.groupby("Category")["Profit"].sum()
+st.bar_chart(profit_df)
+
+# ------------------------------
+# FOOTER
+# ------------------------------
+st.markdown("---")
+st.caption("🚀 Built with Machine Learning • Inventory Science • Streamlit")
