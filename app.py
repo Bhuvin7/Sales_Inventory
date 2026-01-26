@@ -31,65 +31,64 @@ body { background-color: #EAF6FF; }
 """, unsafe_allow_html=True)
 
 # -------------------- TITLE --------------------
-st.title("📊 Smart Inventory & Demand Forecasting Dashboard")
+st.title("📊 Smart Inventory & Demand Forecasting")
 
 # -------------------- FILE UPLOAD --------------------
 uploaded_file = st.file_uploader("📂 Upload your sales dataset (CSV)", type=["csv"])
 
 if uploaded_file is None:
-    st.info("👆 Upload a dataset to begin analysis")
+    st.info("👆 Please upload a CSV file to get started.")
     st.stop()
 
 df = pd.read_csv(uploaded_file)
 
-# -------------------- COLUMN MAPPING --------------------
-st.sidebar.header("🧩 Column Mapping")
+# -------------------- MAIN DATA CONFIGURATION --------------------
+with st.expander("🛠️ Step 1: Data Configuration", expanded=True):
+    st.write("Confirm which columns represent your data:")
+    
+    # Show a small preview so user knows what to select
+    st.dataframe(df.head(3), use_container_width=True)
+    
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        date_col = st.selectbox("Date Column", df.columns)
+    with c2:
+        product_col = st.selectbox("Product Column", df.columns)
+    with c3:
+        demand_col = st.selectbox("Units Sold Column", df.columns)
+    with c4:
+        inventory_col = st.selectbox("Inventory Column (optional)", ["None"] + list(df.columns))
 
-date_col = st.sidebar.selectbox("Select Date Column", df.columns)
-product_col = st.sidebar.selectbox("Select Product Column", df.columns)
-demand_col = st.sidebar.selectbox("Select Demand / Units Sold Column", df.columns)
-
-inventory_col = st.sidebar.selectbox(
-    "Select Inventory Column (optional)",
-    ["None"] + list(df.columns)
-)
-
-# -------------------- DATA PREP (THE FIX) --------------------
-# 1. Force the date conversion immediately
+# -------------------- DATA PREP & CLEANING --------------------
+# Force conversion to datetime
 df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
 
-# 2. Safety Check: If after conversion the column isn't datetime, we can't proceed
+# Check if conversion worked
 if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-    st.error(f"The column '{date_col}' could not be converted to dates. Please ensure it contains dates like '2023-01-01'.")
+    st.error(f"❌ '{date_col}' is not a valid date. Please select a column containing dates.")
     st.stop()
 
-# 3. Drop rows where dates are invalid (NaT)
+# Remove invalid dates and ensure demand is numeric
 df = df.dropna(subset=[date_col])
+df[demand_col] = pd.to_numeric(df[demand_col], errors='coerce').fillna(0)
 
-# 4. Now it is safe to use .dt
+# Create period columns
 df["Year"] = df[date_col].dt.year
 df["Month"] = df[date_col].dt.to_period("M").astype(str)
 
-# 5. Ensure Demand is numeric
-df[demand_col] = pd.to_numeric(df[demand_col], errors='coerce').fillna(0)
+# -------------------- FILTERS (Now in a clean horizontal bar) --------------------
+st.divider()
+f1, f2 = st.columns([2, 1])
+with f1:
+    unique_prods = sorted(df[product_col].astype(str).unique().tolist())
+    selected_product = st.selectbox("🔍 Filter by Product", ["All Products"] + unique_prods)
+with f2:
+    time_view = st.radio("View Frequency", ["Monthly", "Yearly"], horizontal=True)
 
-# -------------------- FILTERS --------------------
-st.sidebar.header("🔎 Filters")
-unique_prods = sorted(df[product_col].astype(str).unique().tolist())
-selected_product = st.sidebar.selectbox("Select Product", ["All"] + unique_prods)
-time_view = st.sidebar.radio("Time View", ["Monthly", "Yearly"])
-
+# Apply Filter
 filtered_df = df.copy()
-if selected_product != "All":
+if selected_product != "All Products":
     filtered_df = df[df[product_col].astype(str) == selected_product]
-
-# -------------------- AGGREGATION --------------------
-if time_view == "Monthly":
-    trend_df = filtered_df.groupby("Month")[[demand_col]].sum().reset_index()
-    x_axis = "Month"
-else:
-    trend_df = filtered_df.groupby("Year")[[demand_col]].sum().reset_index()
-    x_axis = "Year"
 
 # -------------------- KPI METRICS --------------------
 col1, col2, col3 = st.columns(3)
@@ -99,20 +98,30 @@ with col2:
     avg_d = filtered_df[demand_col].mean()
     st.markdown(f"<div class='metric-card'><h3>Avg Demand</h3><h2>{int(avg_d):,}</h2></div>", unsafe_allow_html=True)
 with col3:
-    st.markdown(f"<div class='metric-card'><h3>Products</h3><h2>{filtered_df[product_col].nunique()}</h2></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-card'><h3>Unique Items</h3><h2>{filtered_df[product_col].nunique()}</h2></div>", unsafe_allow_html=True)
 
 # -------------------- TREND CHART --------------------
-st.subheader(f"📈 Demand Trend ({time_view})")
+st.subheader("📈 Demand Trend")
+
+if time_view == "Monthly":
+    trend_df = filtered_df.groupby("Month")[[demand_col]].sum().reset_index()
+    x_axis = "Month"
+else:
+    trend_df = filtered_df.groupby("Year")[[demand_col]].sum().reset_index()
+    x_axis = "Year"
+
 if not trend_df.empty:
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(trend_df[x_axis].astype(str), trend_df[demand_col], marker="o", color="#007BFF")
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.plot(trend_df[x_axis].astype(str), trend_df[demand_col], marker="o", color="#007BFF", linewidth=2)
+    ax.set_facecolor('#f9f9f9')
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
 # -------------------- FORECASTING --------------------
-st.subheader("🔮 3-Month Demand Forecast")
-forecast_results = []
+st.divider()
+st.subheader("🔮 3-Month Automated Forecast")
 
+forecast_results = []
 for product, group in df.groupby(product_col):
     monthly_series = group.sort_values(date_col).groupby("Month")[demand_col].sum()
     if len(monthly_series) < 2: continue
@@ -125,10 +134,13 @@ for product, group in df.groupby(product_col):
     
     forecast_results.append({
         "Product": product,
-        "Current Month": int(last_val),
-        "Forecast (3M)": int(max(0, pred))
+        "Current Sales": int(last_val),
+        "Predicted Demand (3M)": int(max(0, pred))
     })
 
 forecast_df = pd.DataFrame(forecast_results)
 if not forecast_df.empty:
-    st.dataframe(forecast_df, use_container_width=True)
+    st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+
+    # -------------------- INVENTORY ALERTS --------------------
+    if inventory_col != "None
