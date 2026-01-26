@@ -57,7 +57,17 @@ inventory_col = st.sidebar.selectbox(
 )
 
 # -------------------- DATA PREP --------------------
-df[date_col] = pd.to_datetime(df[date_col])
+date_col = "Date"
+
+df[date_col] = pd.to_datetime(
+    df[date_col],
+    errors="coerce",
+    dayfirst=True,
+    infer_datetime_format=True
+)
+
+df = df.dropna(subset=[date_col])
+
 df["Year"] = df[date_col].dt.year
 df["Month"] = df[date_col].dt.to_period("M").astype(str)
 
@@ -191,4 +201,5 @@ st.download_button(
     file_name="demand_forecast_results.csv",
     mime="text/csv"
 )
+
 
