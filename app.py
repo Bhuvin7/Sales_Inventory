@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
@@ -192,3 +191,4 @@ st.download_button(
     file_name="demand_forecast_results.csv",
     mime="text/csv"
 )
+
