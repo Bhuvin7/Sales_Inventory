@@ -73,9 +73,21 @@ inventory_col = st.sidebar.selectbox(
 )
 
 # ================== DATA PREP ==================
-df[date_col] = pd.to_datetime(df[date_col])
-df["Year"] = df[date_col].dt.year
-df["Month"] = df[date_col].dt.to_period("M").astype(str)
+date_col = "Date"
+
+# Convert everything to string first
+df[date_col] = df[date_col].astype(str)
+
+# Parse safely
+df[date_col] = pd.to_datetime(
+    df[date_col],
+    errors="coerce",
+    dayfirst=True
+)
+
+# Remove invalid rows
+df = df[df[date_col].notna()]
+
 
 # ================== SIDEBAR FILTERS ==================
 st.sidebar.header("🎯 Filters")
@@ -208,4 +220,5 @@ else:
     st.info("ℹ️ Inventory column not selected")
 
 st.markdown("</div>", unsafe_allow_html=True)
+
 
